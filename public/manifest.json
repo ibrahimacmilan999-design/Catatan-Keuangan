@@ -1,0 +1,8 @@
+{
+  "name": "Catatan Keuangan Pribadi",
+  "short_name": "CKP",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#161d29",
+  "theme_color": "#161d29"
+}
