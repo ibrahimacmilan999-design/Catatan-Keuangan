@@ -204,31 +204,27 @@ export default function App() {
     setAsetLain(d.asetLain);
   };
 
-  const undo = useCallback(() => {
-    setPast(p => {
-      if (p.length === 0) return p;
-      const prevState = p[p.length - 1];
-      const currentSnapshot = prevSnapshotRef.current;
-      setFuture(f => [currentSnapshot, ...f]);
-      applySnapshot(prevState);
-      showToast("Perubahan diurungkan");
-      return p.slice(0, -1);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const undo = () => {
+    if (past.length === 0) return;
+    const currentSnapshot = takeSnapshot();
+    const prevState = past[past.length - 1];
+    setPast(p => p.slice(0, -1));
+    setFuture(f => [currentSnapshot, ...f]);
+    skipHistory.current = true;
+    applySnapshot(prevState);
+    showToast("Perubahan diurungkan");
+  };
 
-  const redo = useCallback(() => {
-    setFuture(f => {
-      if (f.length === 0) return f;
-      const nextState = f[0];
-      const currentSnapshot = prevSnapshotRef.current;
-      setPast(p => [...p, currentSnapshot]);
-      applySnapshot(nextState);
-      showToast("Perubahan diulangi");
-      return f.slice(1);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const redo = () => {
+    if (future.length === 0) return;
+    const currentSnapshot = takeSnapshot();
+    const nextState = future[0];
+    setFuture(f => f.slice(1));
+    setPast(p => [...p, currentSnapshot]);
+    skipHistory.current = true;
+    applySnapshot(nextState);
+    showToast("Perubahan diulangi");
+  };
 
   // Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z atau Ctrl/Cmd+Y (redo)
   useEffect(() => {
@@ -241,7 +237,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [undo, redo]);
+  });
 
   const balances = useMemo(() => computeAccountBalances(accounts, transaksi), [accounts, transaksi]);
   const totalKasBank = useMemo(() => Object.values(balances).reduce((s, v) => s + v, 0), [balances]);
