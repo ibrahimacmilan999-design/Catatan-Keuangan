@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   LayoutDashboard, Receipt, Wallet, PieChart as PieChartIcon, HandCoins,
   PiggyBank, TrendingUp, Plus, X, Trash2, ArrowRightLeft, ArrowDownCircle,
   ArrowUpCircle, Search, ChevronDown, ChevronRight, CheckCircle2, Circle,
-  BadgeDollarSign
+  BadgeDollarSign, Undo2, Redo2
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -158,6 +158,91 @@ export default function App() {
     setTimeout(() => setToast(null), 2200);
   };
 
+  // ---- Undo / Redo global ----
+  const MAX_HISTORY = 50;
+  const [past, setPast] = useState([]);
+  const [future, setFuture] = useState([]);
+  const skipHistory = useRef(false);
+  const prevSnapshotRef = useRef(null);
+
+  const takeSnapshot = useCallback(() => JSON.stringify({
+    accounts, transaksi, budget, utang, piutang, tabungan, investasi, asetLain
+  }), [accounts, transaksi, budget, utang, piutang, tabungan, investasi, asetLain]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const snapshot = takeSnapshot();
+    if (prevSnapshotRef.current === null) {
+      prevSnapshotRef.current = snapshot;
+      return;
+    }
+    if (snapshot === prevSnapshotRef.current) return;
+    if (skipHistory.current) {
+      skipHistory.current = false;
+      prevSnapshotRef.current = snapshot;
+      return;
+    }
+    setPast(p => {
+      const next = [...p, prevSnapshotRef.current];
+      return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
+    });
+    setFuture([]);
+    prevSnapshotRef.current = snapshot;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, accounts, transaksi, budget, utang, piutang, tabungan, investasi, asetLain]);
+
+  const applySnapshot = (snapshot) => {
+    const d = JSON.parse(snapshot);
+    skipHistory.current = true;
+    setAccounts(d.accounts);
+    setTransaksi(d.transaksi);
+    setBudget(d.budget);
+    setUtang(d.utang);
+    setPiutang(d.piutang);
+    setTabungan(d.tabungan);
+    setInvestasi(d.investasi);
+    setAsetLain(d.asetLain);
+  };
+
+  const undo = useCallback(() => {
+    setPast(p => {
+      if (p.length === 0) return p;
+      const prevState = p[p.length - 1];
+      const currentSnapshot = prevSnapshotRef.current;
+      setFuture(f => [currentSnapshot, ...f]);
+      applySnapshot(prevState);
+      showToast("Perubahan diurungkan");
+      return p.slice(0, -1);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const redo = useCallback(() => {
+    setFuture(f => {
+      if (f.length === 0) return f;
+      const nextState = f[0];
+      const currentSnapshot = prevSnapshotRef.current;
+      setPast(p => [...p, currentSnapshot]);
+      applySnapshot(nextState);
+      showToast("Perubahan diulangi");
+      return f.slice(1);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z atau Ctrl/Cmd+Y (redo)
+  useEffect(() => {
+    const handler = (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((key === "z" && e.shiftKey) || key === "y") { e.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo]);
+
   const balances = useMemo(() => computeAccountBalances(accounts, transaksi), [accounts, transaksi]);
   const totalKasBank = useMemo(() => Object.values(balances).reduce((s, v) => s + v, 0), [balances]);
   const totalSisaPiutang = useMemo(() => piutang.reduce((s, p) => s + Math.max(0, (p.jumlah || 0) - (p.kembali || 0)), 0), [piutang]);
@@ -202,9 +287,29 @@ export default function App() {
               <div className="ckp-brand-sub">Buku kas digital — {new Date().toLocaleDateString("id-ID",{ day:"2-digit", month:"long", year:"numeric" })}</div>
             </div>
           </div>
-          <div className="ckp-networth-chip">
-            <span className="ckp-networth-label">Kekayaan Bersih</span>
-            <span className="ckp-networth-value">{fmtRp(netWorth)}</span>
+          <div className="ckp-header-actions">
+            <button
+              className="ckp-icon-btn"
+              onClick={undo}
+              disabled={past.length === 0}
+              title="Urungkan (Ctrl+Z)"
+              aria-label="Urungkan"
+            >
+              <Undo2 size={16} />
+            </button>
+            <button
+              className="ckp-icon-btn"
+              onClick={redo}
+              disabled={future.length === 0}
+              title="Ulangi (Ctrl+Y)"
+              aria-label="Ulangi"
+            >
+              <Redo2 size={16} />
+            </button>
+            <div className="ckp-networth-chip">
+              <span className="ckp-networth-label">Kekayaan Bersih</span>
+              <span className="ckp-networth-value">{fmtRp(netWorth)}</span>
+            </div>
           </div>
         </div>
         <nav className="ckp-tabs">
@@ -1146,6 +1251,16 @@ const CSS = `
   }
   .ckp-networth-label { font-size: 10px; color: #8b93a7; text-transform: uppercase; letter-spacing: 0.6px; }
   .ckp-networth-value { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 15px; font-weight: 700; color: #d8b874; }
+
+  .ckp-header-actions { display: flex; align-items: center; gap: 8px; }
+  .ckp-icon-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 8px;
+    background: #1c2536; border: 1px solid #3a4356; color: #d8b874;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .ckp-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .ckp-icon-btn:not(:disabled):active { background: #2a3346; }
 
   .ckp-tabs {
     display: flex; gap: 4px; overflow-x: auto; padding: 0 12px 10px;
